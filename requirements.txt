@@ -5,3 +5,4 @@ python-dateutil
 reportlab
 openpyxl
 plotly
+xlrd==1.2.0
