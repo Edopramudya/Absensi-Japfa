@@ -241,20 +241,25 @@ import csv
 
 def read_any_csv(uploaded_file):
     try:
-        # Baca beberapa byte pertama untuk deteksi delimiter
-        sample = uploaded_file.read(2048).decode("utf-8", errors="ignore")
-        uploaded_file.seek(0)  # kembalikan pointer file
+        # Baca sedikit sample untuk deteksi delimiter
+        sample = uploaded_file.read(4096).decode("utf-8", errors="ignore")
+        uploaded_file.seek(0)
 
-        # Deteksi delimiter otomatis
         dialect = csv.Sniffer().sniff(sample, delimiters=";,|\t")
         delimiter = dialect.delimiter
 
-        df = pd.read_csv(uploaded_file, delimiter=delimiter)
-        return df
-    except Exception as e:
-        st.warning(f"Gagal deteksi delimiter otomatis, pakai default koma (,): {e}")
         uploaded_file.seek(0)
-        return pd.read_csv(uploaded_file)
+        return pd.read_csv(uploaded_file, sep=delimiter, engine="python")
+
+    except Exception:
+        # Jika gagal deteksi, coba pakai titik koma IEC/Indonesia (;)
+        try:
+            uploaded_file.seek(0)
+            return pd.read_csv(uploaded_file, sep=";", engine="python")
+        except:
+            # Jika tetap gagal → fallback koma (,)
+            uploaded_file.seek(0)
+            return pd.read_csv(uploaded_file, sep=",", engine="python")
 
 st.write("### Upload file absensi mentah (.csv / .xlsx / .xls)")
 
@@ -337,6 +342,11 @@ if not use_default_master:
             else:
                 st.error("Format master tidak didukung. Gunakan .csv .xlsx .xls")
                 st.stop()
+
+            # ✅ SIMPAN (overwrite) master baru agar PERSISTEN
+            master_df.to_csv("MasterData.csv", index=False, sep=";")
+            st.success("Master data berhasil diperbarui dan disimpan permanen!")
+            
         except Exception as e:
             st.error(f"Gagal membaca file master: {e}")
             master_df = None
