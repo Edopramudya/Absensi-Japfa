@@ -346,7 +346,7 @@ if not use_default_master:
             # ✅ SIMPAN (overwrite) master baru agar PERSISTEN
             master_df.to_csv("MasterData.csv", index=False, sep=";")
             st.success("Master data berhasil diperbarui dan disimpan permanen!")
-            
+
         except Exception as e:
             st.error(f"Gagal membaca file master: {e}")
             master_df = None
@@ -370,11 +370,11 @@ try:
     elif fname.endswith(".xls"):
         df_raw = pd.read_excel(uploaded_file, engine="xlrd")
     else:
-        st.error("Format file tidak didukung. Gunakan .csv / .xlsx / .xls.")
+        st.error("Format file tidak didukung")
         st.stop()
 
 except Exception as e:
-    st.error(f"Gagal membaca file absensi: {e}")
+    st.error(f"Gagal membaca file absensi. Silakan buka di Excel → Save As → Excel Workbook (.xlsx) lalu upload kembali.")
     st.stop()
 
 # ======================
@@ -445,7 +445,7 @@ else:
     st.warning("⚠ Tidak ada Master Data dimuat — proses akan lanjut tanpa informasi Status/Kegiatan master.")
 
 # ======================
-# PROSES UTAMA (SAMA DENGAN ALUR KAMU)
+# PROSES UTAMA 
 # ======================
 try:
     # tentukan Cek_In / Cek_Out berdasarkan Lokasi_ID bila ada
@@ -488,7 +488,6 @@ try:
     )
 
     st.success("✅ Data absensi berhasil diproses.")
-
     # ======================
     # BAGIAN UNDUH (PDF / BULANAN ZIP / CSV REKAP)
     # ======================
@@ -571,20 +570,37 @@ try:
         if master_df is not None:
             if "ID" in master_df.columns and "Status" in master_df.columns:
                 # use ID-based merge
-                tmp = tmp.merge(master_df[["ID", "Status"]].rename(columns={"ID":"ID"}), on="ID", how="left")
+                tmp = tmp.merge(master_df[["ID", "Status"]].rename(columns={"ID": "ID"}), on="ID", how="left")
                 tmp["Status"] = tmp["Status"].fillna("")
             elif "Nama" in master_df.columns and "Status" in master_df.columns:
                 # fallback to name-based
                 tmp["Nama_up"] = tmp["Nama"].astype(str).str.strip().str.upper()
                 master_df["Nama_up"] = master_df["Nama"].astype(str).str.strip().str.upper()
-                tmp = tmp.merge(master_df[["Nama_up","Status"]].rename(columns={"Nama_up":"Nama"}), on="Nama", how="left")
+                tmp = tmp.merge(master_df[["Nama_up", "Status"]].rename(columns={"Nama_up": "Nama"}), on="Nama", how="left")
                 tmp["Status"] = tmp["Status"].fillna("")
             else:
                 tmp["Status"] = ""
         else:
             tmp["Status"] = ""
 
-        # pivot table (index includes status so it will be carried to rekap)
+        # 🩵 Pastikan tidak ada NaN
+        tmp["Kegiatan"] = tmp["Kegiatan"].fillna("")
+        tmp["Status"] = tmp["Status"].fillna("")
+
+        # === Gabungkan nama berbeda tapi NIP sama ===
+        tmp["Nama_up"] = tmp["Nama"].astype(str).str.strip().str.upper()
+        # ambil nama paling sering muncul untuk setiap NIP
+        nama_utama = (
+            tmp.groupby("ID")["Nama_up"]
+            .agg(lambda x: x.value_counts().idxmax())
+            .reset_index()
+            .rename(columns={"Nama_up": "Nama_final"})
+        )
+        tmp = tmp.merge(nama_utama, on="ID", how="left")
+        tmp["Nama"] = tmp["Nama_final"].fillna(tmp["Nama"])
+        tmp.drop(columns=["Nama_final"], inplace=True)
+
+        # === Pivot table ===
         rekap = (
             tmp.pivot_table(
                 index=["ID", "Nama", "Kegiatan", "Status"],
@@ -596,22 +612,28 @@ try:
             .reset_index()
         )
 
-        # ensure all days present
+        rekap = (
+            rekap.groupby(["ID", "Nama", "Status"], dropna=False)
+            .agg({**{d: "max" for d in day_cols}, "Kegiatan": lambda x: ", ".join(sorted(set(x)))})
+            .reset_index()
+        )
+
+        # pastikan semua hari ada
         for d in day_cols:
             if d not in rekap.columns:
                 rekap[d] = False
 
-        # order columns
+        # urutkan kolom
         ordered = ["ID", "Nama", "Kegiatan", "Status"] + day_cols
         rekap = rekap[[c for c in ordered if c in rekap.columns]]
-        # sort rows
         rekap = rekap.sort_values(["Nama", "ID"]).reset_index(drop=True)
 
+        # ubah ke simbol
         for d in day_cols:
             rekap[d] = rekap[d].apply(lambda x: "✔" if bool(x) else "")
         rekap["Total"] = rekap[day_cols].apply(lambda row: sum(1 for v in row if v == "✔"), axis=1)
 
-        # clean NaN
+        # clean backup
         rekap["Kegiatan"] = rekap["Kegiatan"].fillna("")
         rekap["Status"] = rekap["Status"].fillna("")
 
@@ -621,7 +643,7 @@ try:
         rekap_csv = rekap_csv.replace("✔", "v")
         rekap_csv["Nama"] = rekap_csv["Nama"].astype(str).str.title()
 
-        # save to buffer with utf-8-sig and semicolon
+        # save to buffer
         csv_buf = io.StringIO()
         rekap_csv.to_csv(csv_buf, index=False, sep=";", encoding="utf-8-sig")
         csv_buf.seek(0)
@@ -633,6 +655,7 @@ try:
             mime="text/csv",
             use_container_width=True
         )
+
 
         # ======================
         # DASHBOARD (tampil setelah proses berhasil)
@@ -684,7 +707,7 @@ try:
         fig_bar_status.update_traces(textposition="outside")
         st.plotly_chart(fig_bar_status, use_container_width=True)
 
-        # 4) pie shift
+        # 4) pie shift csv
         shift_totals = final_result[["Shift1","Shift2","Shift3"]].sum().reset_index()
         shift_totals.columns = ["Shift","Jumlah"]
         shift_totals["Shift"] = shift_totals["Shift"].str.replace("Shift", "Shift ")
