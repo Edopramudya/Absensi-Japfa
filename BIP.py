@@ -546,12 +546,26 @@ try:
         final_result = final_result.copy()
         final_result["Tanggal"] = pd.to_datetime(final_result["Tanggal"])
 
-        # month days
+        # --- Tentukan apakah data harian atau bulanan ---
         first_date = final_result["Tanggal"].min()
+
+        if pd.isna(first_date):
+            st.warning("Tidak ada data tanggal untuk diproses.")
+            st.stop()
+
+        # Siapkan bulan untuk nama file (wajib ada)
         month_start = first_date.replace(day=1)
         month_end = (first_date + pd.offsets.MonthEnd(0)).normalize()
-        month_days = pd.date_range(month_start, month_end)
-        day_cols = [d.day for d in month_days]  # list 1..28/29/30/31
+
+        # Jika data hanya berisi satu hari (absensi harian)
+        if final_result["Tanggal"].dt.date.nunique() == 1:
+            # Hanya pakai hari yang muncul agar tidak error
+            day_cols = sorted(final_result["Tanggal"].dt.day.unique().tolist())
+        else:
+            # Data bulanan → buat daftar semua hari dalam bulan
+            month_days = pd.date_range(month_start, month_end)
+            day_cols = [d.day for d in month_days]
+
 
         # presence and day
         tmp = final_result.copy()
